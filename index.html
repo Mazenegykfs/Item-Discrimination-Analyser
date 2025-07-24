@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Item Discrimination Analyzer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: linear-gradient(to right, #e0f7fa, #f1f8e9);
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background-color: #00bcd4;
+      color: white;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    header img {
+      height: 50px;
+      position: absolute;
+      left: 20px;
+      top: 10px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 24px;
+      text-align: center;
+    }
+    .container {
+      padding: 30px;
+      max-width: 1200px;
+      margin: auto;
+      background-color: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      margin-top: 30px;
+    }
+    input[type="number"], button, input[type="file"] {
+      font-size: 16px;
+      margin: 10px 10px 10px 0;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    button {
+      background-color: #00bcd4;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background-color: #0097a7;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: center;
+    }
+    th {
+      background-color: #00bcd4;
+      color: white;
+    }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+
+    #fileName, #itemCount {
+      margin: 10px 0;
+      font-weight: bold;
+      color: #444;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 15px;
+      }
+      header h1 {
+        font-size: 18px;
+      }
+      header img {
+        height: 35px;
+        top: 15px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <img src="00.png" alt="Logo">
+  <h1>Developed by Dr. Mazen Badawy – Doctorate of TEFL</h1>
+</header>
+
+<header>
+  <h1>Item Discrimination Analyser</h1>
+</header>
+<div class="container">
+  <input type="file" id="fileInput" accept=".xlsx, .xls">
+  Set % for Upper/Lower Groups:
+  <input type="number" id="percentInput" value="25" min="1" max="49">
+  <button onclick="processFile()">Analyze</button>
+  <button onclick="downloadExcel()">Export Results</button>
+
+  <div id="fileName"></div>
+  <div id="itemCount"></div>
+
+  <table id="resultsTable" style="display:none;">
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Total Score</th>
+        <th>Upper group correct answers</th>
+        <th>Lower group correct answers</th>
+        <th>Rank Discrimination</th>
+        <th>Point-Biserial (r_pb)</th>
+        <th>Interpretation</th>
+        <th>Rank</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+  let resultsData = [];
+
+  function processFile() {
+    const file = document.getElementById('fileInput').files[0];
+    const percent = parseFloat(document.getElementById('percentInput').value) / 100;
+
+    if (!file) return alert("Please upload an Excel file.");
+    if (!(percent > 0 && percent < 0.5)) return alert("Enter a % between 1 and 49");
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type: 'array'});
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, {header: 1});
+
+      const headers = json[0];
+      const rows = json.slice(1);
+      const totalScores = rows.map(row => row.reduce((sum, val) => sum + Number(val || 0), 0));
+      const topCount = Math.floor(rows.length * percent);
+      const sortedIndices = totalScores.map((score, i) => [score, i]).sort((a,b) => b[0]-a[0]).map(x => x[1]);
+
+      const upperIndices = sortedIndices.slice(0, topCount);
+      const lowerIndices = sortedIndices.slice(-topCount);
+
+      resultsData = headers.map((item, colIndex) => {
+        const col = rows.map(row => Number(row[colIndex] || 0));
+        const total = col.reduce((a,b) => a + b, 0);
+        const upperSum = upperIndices.reduce((sum, i) => sum + col[i], 0);
+        const lowerSum = lowerIndices.reduce((sum, i) => sum + col[i], 0);
+        const rankDisc = ((upperSum / topCount) - (lowerSum / topCount)).toFixed(3);
+
+        const avgX = col.reduce((a,b) => a + b, 0) / col.length;
+        const avgY = totalScores.reduce((a,b) => a + b, 0) / totalScores.length;
+
+        const stdX = Math.sqrt(col.map(x => (x - avgX)**2).reduce((a,b) => a + b, 0) / col.length);
+        const stdY = Math.sqrt(totalScores.map(y => (y - avgY)**2).reduce((a,b) => a + b, 0) / totalScores.length);
+
+        let cov = 0;
+        for (let i = 0; i < col.length; i++) {
+          cov += (col[i] - avgX) * (totalScores[i] - avgY);
+        }
+        cov /= col.length;
+        const r_pb = (stdX && stdY) ? (cov / (stdX * stdY)).toFixed(3) : "N/A";
+
+        let interpVal = isNaN(r_pb) || r_pb === "N/A" ? parseFloat(rankDisc) : parseFloat(r_pb);
+        let interp = interpVal >= 0.4 ? "Excellent" :
+                     interpVal >= 0.3 ? "Good" :
+                     interpVal >= 0.2 ? "Fair" :
+                     interpVal >= 0.1 ? "Poor" : "Very Poor";
+
+        return {
+          Item: item,
+          Total: total,
+          Upper: upperSum,
+          Lower: lowerSum,
+          RankDiscrimination: rankDisc,
+          r_pb: r_pb,
+          Interpretation: interp
+        };
+      });
+
+      resultsData.sort((a, b) => b.RankDiscrimination - a.RankDiscrimination);
+      resultsData.forEach((r, i) => r.Rank = i + 1);
+
+      document.getElementById('fileName').innerText = `Loaded File: ${file.name}`;
+      document.getElementById('itemCount').innerText = `Total Items: ${resultsData.length} | Upper Group Size: ${topCount} | Lower Group Size: ${topCount}`;
+      renderTable();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function renderTable() {
+    const table = document.getElementById('resultsTable');
+    const tbody = table.querySelector("tbody");
+    tbody.innerHTML = "";
+    resultsData.forEach(row => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${row.Item}</td>
+        <td>${row.Total}</td>
+        <td>${row.Upper}</td>
+        <td>${row.Lower}</td>
+        <td>${row.RankDiscrimination}</td>
+        <td>${row.r_pb}</td>
+        <td>${row.Interpretation}</td>
+        <td>${row.Rank}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+    table.style.display = "table";
+  }
+
+  function downloadExcel() {
+    if (resultsData.length === 0) {
+      alert("No data to export.");
+      return;
+    }
+    const ws = XLSX.utils.json_to_sheet(resultsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Item Discrimination");
+    XLSX.writeFile(wb, "Item_Discrimination_Results.xlsx");
+  }
+</script>
+
+</body>
+</html>
